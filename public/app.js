@@ -1,26 +1,23 @@
-// Default favorites, looked up via the TuneIn API (Search.ashx / Tune.ashx).
-// `streams` are the direct URLs Tune.ashx returned; used as a fallback if
-// the live lookup fails.
+// Default favorites. Only the station id is stored; stream URLs are looked up
+// via the TuneIn API (Tune.ashx) every time a station is played.
 const DEFAULT_FAVORITES = [
   {
     id: "s27454",
     name: "WBHM 90.3 (Birmingham, AL)",
     subtext: "NPR News",
     image: "https://cdn-radiotime-logos.tunein.com/s27454q.png",
-    streams: [
-      "https://streams.radiomast.io/268b6214-4f60-4898-85f6-51132c9fa4e0",
-      "https://audio.wbhm.org/live.m4a",
-    ],
   },
   {
     id: "s32152",
     name: "KCRW 89.9 (Santa Monica, CA)",
     subtext: "NPR News & Music",
     image: "https://cdn-profiles.tunein.com/s32152/images/logoq.png?t=5",
-    streams: [
-      "https://streams.kcrw.com/kcrw_mp3?aw_0_1st.playerid=TuneIn",
-      "https://streams.kcrw.com/kcrw_aac?aw_0_1st.playerid=TuneIn",
-    ],
+  },
+  {
+    id: "s24211",
+    name: "88Nine Radio Milwaukee 88.9 (Milwaukee-Racine)",
+    subtext: "Rock",
+    image: "https://cdn-radiotime-logos.tunein.com/s24211q.png",
   },
 ];
 
@@ -30,16 +27,45 @@ const audio = $("audio");
 let current = null;
 
 // ---------- Favorites (persisted in localStorage) ----------
+const SEEN_KEY = "tunein-seen-defaults";
+// Saved favorites win, but any default the user hasn't been offered yet is
+// added once (so new defaults appear, and removed defaults stay removed).
 function loadFavorites() {
+  let saved = null, seen = [];
+  try { saved = JSON.parse(localStorage.getItem(FAV_KEY)); } catch {}
+  try { seen = JSON.parse(localStorage.getItem(SEEN_KEY)) || []; } catch {}
+  if (!Array.isArray(saved)) { saved = []; seen = []; }
+  // Favorites saved before SEEN_KEY existed: treat the original defaults as seen.
+  if (!seen.length && saved.length) seen = ["s27454", "s32152"];
+  const fresh = DEFAULT_FAVORITES.filter((d) => !seen.includes(d.id) && !saved.some((f) => f.id === d.id));
+  const result = [...saved, ...fresh];
   try {
-    const saved = JSON.parse(localStorage.getItem(FAV_KEY));
-    if (Array.isArray(saved)) return saved;
+    localStorage.setItem(FAV_KEY, JSON.stringify(result));
+    localStorage.setItem(SEEN_KEY, JSON.stringify(DEFAULT_FAVORITES.map((d) => d.id)));
   } catch {}
-  return DEFAULT_FAVORITES.slice();
+  return result;
 }
 let favorites = loadFavorites();
 function saveFavorites() {
   try { localStorage.setItem(FAV_KEY, JSON.stringify(favorites)); } catch {}
+}
+// On load, look up each favorite by id (Describe.ashx) and update
+// name/subtext/image if they changed. Failures leave it as is.
+async function refreshFavorites() {
+  let changed = false;
+  await Promise.all(favorites.map(async (fav, i) => {
+    try {
+      const r = await fetch(`/api/station?id=${encodeURIComponent(fav.id)}`);
+      if (!r.ok) return;
+      const fresh = await r.json();
+      const next = { ...fav, name: fresh.name || fav.name, subtext: fresh.subtext, image: fresh.image || fav.image };
+      if (["name", "subtext", "image"].some((k) => next[k] !== fav[k])) {
+        favorites[i] = next;
+        changed = true;
+      }
+    } catch {}
+  }));
+  if (changed) { saveFavorites(); renderFavorites(); }
 }
 const isFav = (id) => favorites.some((f) => f.id === id);
 function toggleFav(station) {
@@ -109,9 +135,9 @@ async function getStreams(station) {
   try {
     const r = await fetch(`/api/tune?id=${encodeURIComponent(station.id)}`);
     const streams = await r.json();
-    if (r.ok && streams.length) return streams.map((s) => s.url);
+    if (r.ok) return streams.map((s) => s.url);
   } catch {}
-  return station.streams || [];
+  return [];
 }
 async function play(station) {
   current = station;
@@ -139,7 +165,27 @@ $("playPause").onclick = () => {
 };
 audio.onplay = () => { $("playPause").textContent = "⏸"; $("playPause").ariaLabel = "Pause"; };
 audio.onpause = () => { $("playPause").textContent = "▶"; $("playPause").ariaLabel = "Play"; };
-$("volume").oninput = (e) => (audio.volume = e.target.value);
+// Surface problems that happen after play() resolves (decode errors, stalls).
+audio.onerror = () => {
+  const e = audio.error;
+  console.error("Audio error", e);
+  $("npSub").textContent = `Playback error${e ? ` (code ${e.code})` : ""}`;
+};
+audio.onwaiting = () => { $("npSub").textContent = "Buffering…"; };
+audio.onplaying = () => {
+  console.log("Playing", audio.currentSrc, { muted: audio.muted, volume: audio.volume });
+  $("npSub").textContent = current?.subtext || "Live";
+};
+const VOL_KEY = "tunein-volume";
+try {
+  const v = parseFloat(localStorage.getItem(VOL_KEY));
+  if (v >= 0 && v <= 1) $("volume").value = v;
+} catch {}
+$("volume").oninput = (e) => {
+  audio.muted = false;
+  audio.volume = e.target.value;
+  try { localStorage.setItem(VOL_KEY, e.target.value); } catch {}
+};
 audio.volume = $("volume").value;
 
 // ---------- Favorites menu toggle ----------
@@ -156,3 +202,4 @@ document.addEventListener("click", (e) => {
 });
 
 renderFavorites();
+refreshFavorites();

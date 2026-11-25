@@ -44,6 +44,30 @@ async function search(q) {
     }));
 }
 
+// Fallback: tunein.com's own search page, which still lists stations the
+// OPML API hides (e.g. is_available:false). Results are embedded in the page
+// as JSON, so pull the station entries out of it. Any failure -> no extras.
+async function searchWeb(q) {
+  const r = await fetch(`https://tunein.com/search/?query=${encodeURIComponent(q)}`, {
+    headers: { "User-Agent": "Mozilla/5.0" },
+    signal: AbortSignal.timeout(6000),
+  });
+  if (!r.ok) throw new Error(`tunein.com returned ${r.status}`);
+  const html = await r.text();
+  const str = '"((?:[^"\\\\]|\\\\.)*)"';
+  const re = new RegExp(
+    `"guideId":"(s\\d+)","playableGuideId":"[^"]*","parentGuideId":"[^"]*","containerGuideId":"[^"]*",` +
+    `"parentTitle":"[^"]*","seoInfo":\\{[^}]*\\},"type":"Station","containerType":"[^"]*",` +
+    `"image":${str},"a11yTitle":${str},"title":${str}(?:,"subtitle":${str})?`, "g");
+  const un = (v) => (v === undefined ? "" : JSON.parse(`"${v}"`));
+  return [...html.matchAll(re)].map((m) => ({
+    id: m[1],
+    name: un(m[4]),
+    subtext: un(m[5]),
+    image: un(m[2]).replace(/^http:/, "https:"),
+  }));
+}
+
 // GET /api/tune?id=s12345 -> direct stream URLs, best first
 async function tune(id) {
   const data = await tunein("Tune.ashx", { id, formats: "mp3,aac" });
@@ -53,13 +77,39 @@ async function tune(id) {
     .sort((a, b) => (b.reliability || 0) - (a.reliability || 0));
 }
 
+// GET /api/station?id=s12345 -> current name/subtext/image for one station
+async function station(id) {
+  const data = await tunein("Describe.ashx", { id });
+  const s = (data.body || []).find((b) => b.element === "station");
+  if (!s) return null;
+  const freq = s.frequency ? ` ${s.frequency}` : "";
+  const loc = s.location ? ` (${s.location})` : "";
+  return {
+    id: s.guide_id,
+    name: `${s.name}${freq}${loc}`,
+    subtext: s.genre_name || "",
+    image: (s.logo || "").replace(/^http:/, "https:"),
+  };
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
   try {
     if (url.pathname === "/api/search") {
       const q = (url.searchParams.get("q") || "").trim();
       if (!q) return sendJSON(res, 400, { error: "Missing q" });
-      return sendJSON(res, 200, await search(q));
+      const [api, web] = await Promise.allSettled([search(q), searchWeb(q)]);
+      if (api.status === "rejected" && web.status === "rejected") throw api.reason;
+      const results = api.status === "fulfilled" ? api.value : [];
+      const seen = new Set(results.map((s) => s.id));
+      if (web.status === "fulfilled") results.push(...web.value.filter((s) => !seen.has(s.id)));
+      return sendJSON(res, 200, results);
+    }
+    if (url.pathname === "/api/station") {
+      const id = url.searchParams.get("id") || "";
+      if (!/^[a-z]\d+$/i.test(id)) return sendJSON(res, 400, { error: "Bad id" });
+      const st = await station(id);
+      return st ? sendJSON(res, 200, st) : sendJSON(res, 404, { error: "Not found" });
     }
     if (url.pathname === "/api/tune") {
       const id = url.searchParams.get("id") || "";
