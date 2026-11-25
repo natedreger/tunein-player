@@ -176,7 +176,16 @@ audio.onplaying = () => {
   console.log("Playing", audio.currentSrc, { muted: audio.muted, volume: audio.volume });
   $("npSub").textContent = current?.subtext || "Live";
 };
-$("volume").oninput = (e) => { audio.muted = false; audio.volume = e.target.value; };
+const VOL_KEY = "tunein-volume";
+try {
+  const v = parseFloat(localStorage.getItem(VOL_KEY));
+  if (v >= 0 && v <= 1) $("volume").value = v;
+} catch {}
+$("volume").oninput = (e) => {
+  audio.muted = false;
+  audio.volume = e.target.value;
+  try { localStorage.setItem(VOL_KEY, e.target.value); } catch {}
+};
 audio.volume = $("volume").value;
 
 // ---------- Favorites menu toggle ----------
