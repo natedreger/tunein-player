@@ -1,0 +1,48 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "description": "Add TuneIn Radio? You get a TuneIn sidebar panel, plus TuneIn in the media browser of every media player, including OwnTone."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "TuneIn Radio is already set up."
+    }
+  },
+  "services": {
+    "play": {
+      "name": "Play station",
+      "description": "Plays a TuneIn station on the target media players, for example an OwnTone speaker.",
+      "fields": {
+        "station_id": {
+          "name": "Station ID",
+          "description": "TuneIn station ID, for example s27454 for WBHM."
+        },
+        "query": {
+          "name": "Search",
+          "description": "Plays the top search result when no station ID is given."
+        }
+      }
+    },
+    "add_favorite": {
+      "name": "Add favorite",
+      "description": "Adds a TuneIn station to favorites.",
+      "fields": {
+        "station_id": {
+          "name": "Station ID",
+          "description": "TuneIn station ID, for example s32152 for KCRW."
+        }
+      }
+    },
+    "remove_favorite": {
+      "name": "Remove favorite",
+      "description": "Removes a TuneIn station from favorites.",
+      "fields": {
+        "station_id": {
+          "name": "Station ID",
+          "description": "TuneIn station ID."
+        }
+      }
+    }
+  }
+}

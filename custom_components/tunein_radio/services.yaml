@@ -1,0 +1,27 @@
+play:
+  target:
+    entity:
+      domain: media_player
+  fields:
+    station_id:
+      example: s27454
+      selector:
+        text:
+    query:
+      example: KCRW
+      selector:
+        text:
+add_favorite:
+  fields:
+    station_id:
+      required: true
+      example: s32152
+      selector:
+        text:
+remove_favorite:
+  fields:
+    station_id:
+      required: true
+      example: s32152
+      selector:
+        text:

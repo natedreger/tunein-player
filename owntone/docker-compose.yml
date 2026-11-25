@@ -1,0 +1,22 @@
+# OwnTone server (the audio side). It streams to AirPlay, Chromecast and local
+# speakers. Home Assistant's built-in OwnTone integration (forked_daapd)
+# connects to it on port 3689.
+#
+#   docker compose up -d
+#   then open http://<this-host>:3689 to pick speakers (outputs).
+#
+# Host networking is needed so OwnTone can discover AirPlay/Chromecast speakers
+# via mDNS.
+services:
+  owntone:
+    image: lscr.io/linuxserver/daapd:latest
+    container_name: owntone
+    network_mode: host
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Chicago
+    volumes:
+      - ./config:/config
+      - ./music:/music # optional local library
+    restart: unless-stopped
