@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TuneIn Player</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>📻 TuneIn Player</h1>
+    <button id="favToggle" aria-expanded="false" aria-controls="favMenu">★ Favorites</button>
+  </header>
+
+  <nav id="favMenu" hidden>
+    <h2>Favorites</h2>
+    <ul id="favList"></ul>
+  </nav>
+
+  <main>
+    <form id="searchForm" role="search">
+      <input id="q" type="search" placeholder="Search stations (e.g. jazz, BBC, KEXP)" autocomplete="off" />
+      <button type="submit">Search</button>
+    </form>
+    <p id="status"></p>
+    <ul id="results"></ul>
+  </main>
+
+  <footer id="player">
+    <img id="npLogo" alt="" />
+    <div class="np">
+      <div id="npName">Nothing playing</div>
+      <div id="npSub"></div>
+    </div>
+    <button id="playPause" disabled aria-label="Play">▶</button>
+    <input id="volume" type="range" min="0" max="1" step="0.05" value="0.8" aria-label="Volume" />
+    <audio id="audio" preload="none"></audio>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
