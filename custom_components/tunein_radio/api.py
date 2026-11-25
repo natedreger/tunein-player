@@ -2,16 +2,84 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import asdict, dataclass
+import json
+import logging
 import re
 from typing import Any
 from urllib.parse import parse_qsl, urlparse
 
 import aiohttp
 
+_LOGGER = logging.getLogger(__name__)
+
 BASE_URL = "https://opml.radiotime.com"
 TIMEOUT = aiohttp.ClientTimeout(total=15)
 STATION_ID_RE = re.compile(r"^s\d+$")
+
+# Fallback search: tunein.com's own search page lists some stations the OPML
+# API leaves out (e.g. ones flagged is_available:false). Its results are JSON
+# embedded in the page; this pulls out the Station entries. It depends on
+# TuneIn's page format, so any failure just means no extra results.
+WEB_SEARCH_URL = "https://tunein.com/search/"
+WEB_SEARCH_TIMEOUT = aiohttp.ClientTimeout(total=6)
+_JSON_STR = r'"((?:[^"\\]|\\.)*)"'
+WEB_STATION_RE = re.compile(
+    r'"guideId":"(s\d+)","playableGuideId":"[^"]*","parentGuideId":"[^"]*",'
+    r'"containerGuideId":"[^"]*","parentTitle":"[^"]*","seoInfo":\{[^}]*\},'
+    r'"type":"Station","containerType":"[^"]*",'
+    rf'"image":{_JSON_STR},"a11yTitle":{_JSON_STR},"title":{_JSON_STR}'
+    rf'(?:,"subtitle":{_JSON_STR})?'
+)
+
+
+def _unescape(value: str | None) -> str:
+    """Decode a JSON string body captured by WEB_STATION_RE."""
+    if value is None:
+        return ""
+    try:
+        return json.loads(f'"{value}"')
+    except ValueError:
+        return value
+
+
+def rank_by_name(stations: list[Station], query: str) -> list[Station]:
+    """Put exact name matches first, then prefix matches; otherwise keep order.
+
+    So searching "KEXP" puts KEXP itself first, even when it only came from the
+    fallback.
+    """
+    q = query.strip().casefold()
+
+    def rank(station: Station) -> int:
+        name = station.name.casefold()
+        bare = re.sub(r"\s*\(.*\)$", "", name)  # "WBHM 90.3 (Birmingham, AL)"
+        if q in (name, bare):
+            return 0
+        return 1 if name.startswith(q) else 2
+
+    return sorted(stations, key=rank)  # sorted() is stable
+
+
+def parse_web_search(html: str) -> list[Station]:
+    """Extract stations from a tunein.com search page."""
+    stations: list[Station] = []
+    seen: set[str] = set()
+    for match in WEB_STATION_RE.finditer(html):
+        station_id, image, _a11y, title, subtitle = match.groups()
+        if station_id in seen:
+            continue
+        seen.add(station_id)
+        stations.append(
+            Station(
+                id=station_id,
+                name=_unescape(title) or station_id,
+                subtext=_unescape(subtitle),
+                image=https(_unescape(image)),
+            )
+        )
+    return stations
 
 FORMAT_TO_MIME = {
     "mp3": "audio/mpeg",
@@ -144,9 +212,45 @@ class TuneInClient:
         return data
 
     async def search(self, query: str) -> list[Station]:
-        """Search for live stations."""
+        """Search for live stations: the OPML API plus the tunein.com fallback.
+
+        API results come first; the fallback only adds stations the API
+        didn't return. Raises only if both sources fail.
+        """
+        api, web = await asyncio.gather(
+            self.search_api(query), self.search_web(query), return_exceptions=True
+        )
+        if isinstance(api, BaseException) and isinstance(web, BaseException):
+            raise api if isinstance(api, TuneInError) else TuneInError(str(api))
+        if isinstance(api, BaseException):
+            _LOGGER.debug("TuneIn API search failed, using web results only: %s", api)
+            api = []
+        if isinstance(web, BaseException):
+            _LOGGER.debug("tunein.com fallback search failed: %s", web)
+            web = []
+        seen = {s.id for s in api}
+        merged = [*api, *(s for s in web if s.id not in seen)]
+        return rank_by_name(merged, query)
+
+    async def search_api(self, query: str) -> list[Station]:
+        """Search live stations with the OPML API (Search.ashx)."""
         body = await self._get("Search.ashx", {"query": query, "types": "station"})
         return [Station.from_outline(i) for i in body if is_station_outline(i)]
+
+    async def search_web(self, query: str) -> list[Station]:
+        """Search tunein.com's own search page (fallback)."""
+        try:
+            async with self._session.get(
+                WEB_SEARCH_URL,
+                params={"query": query},
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=WEB_SEARCH_TIMEOUT,
+            ) as resp:
+                resp.raise_for_status()
+                html = await resp.text()
+        except (aiohttp.ClientError, TimeoutError) as err:
+            raise TuneInError(f"tunein.com search failed: {err}") from err
+        return parse_web_search(html)
 
     async def browse(
         self, query: str | None = None

@@ -29,6 +29,7 @@ next to Home Assistant; `owntone/docker-compose.yml` is provided.
 | **Sidebar panel** ("TuneIn") | Search box, ★ Favorites, speaker picker (OwnTone first), play/pause/stop/volume. "This browser" plays on the device you're using. |
 | **Media browser** | *Media → TuneIn Radio* in HA, and inside the OwnTone player's own browser: Favorites, Local Radio, Music, Talk, Sports, By Location, By Language. Search where your HA version supports it. |
 | **Actions** | `tunein_radio.play` (station ID or search text) · `tunein_radio.add_favorite` · `tunein_radio.remove_favorite` |
+| **Search** | Uses TuneIn's API, plus a fallback to tunein.com's own search page, which lists some stations the API leaves out (KEXP, BBC Radio 1, WBGO…). Exact name matches come first, so `query: KEXP` plays KEXP. If tunein.com changes its page, the fallback simply adds nothing. |
 | **Favorites** | Stored in HA, so they're shared by every user and device. Preloaded with **WBHM 90.3** (`s27454`) and **KCRW 89.9** (`s32152`). |
 
 ## Setup
@@ -85,7 +86,7 @@ npm start   # Node 18+, no dependencies → http://localhost:3000
 ```
 custom_components/tunein_radio/
   __init__.py       setup, actions, panel registration
-  api.py            async TuneIn client (Search / Browse / Describe / Tune)
+  api.py            async TuneIn client (Search / Browse / Describe / Tune + tunein.com search fallback)
   media_source.py   TuneIn in HA's media browser (and OwnTone's)
   websocket.py      commands used by the panel
   favorites.py      favorites stored in HA's .storage
